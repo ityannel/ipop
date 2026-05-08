@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
 import { fetchDueWords, fetchQuestion, submitReview } from '../services/api';
 
-// 文字ごとの差分を計算
 function diffChars(input, answer) {
   const maxLen = Math.max(input.length, answer.length);
   const result = [];
@@ -81,6 +80,25 @@ export default function StudyScreen() {
   const startTimeRef = useRef(null);
   const inputRef = useRef(null);
 
+  useEffect(() => { loadDueWords(); }, []);
+
+  async function loadDueWords(isExtra = false) {
+    setIsLoading(true);
+    try {
+      const data = await fetchDueWords(isExtra);
+      const all = [...(data.review || []), ...(data.new || [])];
+      setDueWords(all);
+      if (all.length > 0) {
+        setCurrentIndex(0);
+        await loadQuestion(all[0]);
+      }
+    } catch (e) {
+      Alert.alert('エラー', e.message);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+  
   async function loadQuestion(word) {
     setIsLoading(true);
     setUserInput('');
