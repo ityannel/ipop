@@ -12,8 +12,8 @@ const port = process.env.PORT || 3001;
 // ─────────────────────────────────────────────
 //  Constants
 // ─────────────────────────────────────────────
-const grammarSpec = fs.readFileSync(path.join(__dirname, 'i-tya-grammar.txt'), 'utf8');
-
+const grammarSpec = fs.readFileSync(path.join(__dirname, 'i-tya-grammer.txt'), 'utf8');
+const AI_MODEL = 'gemini-3.1-flash-lite';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const epopModel = genAI.getGenerativeModel({ 
   model: AI_MODEL,
@@ -38,12 +38,6 @@ const serviceAccount = require('./serviceAccountKey.json');
 admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 db.settings({ ignoreUndefinedProperties: true });
-
-// ─────────────────────────────────────────────
-//  Gemini 初期化
-// ─────────────────────────────────────────────
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const epopModel = genAI.getGenerativeModel({ model: AI_MODEL });
 
 // ─────────────────────────────────────────────
 //  辞書キャッシュ（12時間TTL）
