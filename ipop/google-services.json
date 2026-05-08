@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "432805758863",
+    "project_id": "i-tya-dictionary",
+    "storage_bucket": "i-tya-dictionary.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:432805758863:android:9ac8d17d19a5fe8283adfa",
+        "android_client_info": {
+          "package_name": "com.ityan.ipop"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "432805758863-jig4m6itcf7oedv7nqf8uf6ebuhlbiq2.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDeFU8_nqVjq99KsR0k2p3VRvahf-Rt_78"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "432805758863-jig4m6itcf7oedv7nqf8uf6ebuhlbiq2.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
