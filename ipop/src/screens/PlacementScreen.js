@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
+import { fetchPlacement, fetchQuestion, submitPlacement } from '../services/api';
 
 export default function PlacementScreen({ idToken, onComplete }) {
   const [words, setWords] = useState([]);
@@ -12,7 +13,6 @@ export default function PlacementScreen({ idToken, onComplete }) {
   const [isFinishing, setIsFinishing] = useState(false);
   const startTimeRef = useRef(null);
   const inputRef = useRef(null);
-  import { fetchPlacement, fetchQuestion, finishPlacement } from '../services/api';
 
   useEffect(() => { loadPlacement(); }, []);
 
@@ -48,9 +48,6 @@ export default function PlacementScreen({ idToken, onComplete }) {
       const nextWord = (allWords || words)[currentIndex + 1];
       if (nextWord && !questions[nextWord.id]) {
         fetchQuestion(nextWord.id).then(d => {
-          method: 'POST',
-          body: JSON.stringify({ wordId: nextWord.id }),
-        }, idToken).then(d => {
           setQuestions(prev => ({
             ...prev,
             [nextWord.id]: { question: d.question, answer: d.answer, syllableCount: d.syllableCount },
@@ -74,7 +71,6 @@ export default function PlacementScreen({ idToken, onComplete }) {
 
   async function handleSubmit() {
     if (!userInput.trim()) return;
-    const currentWord = words[currentIndex];
     const qData = questions[currentWord.id];
     if (!qData) return;
 
@@ -84,7 +80,6 @@ export default function PlacementScreen({ idToken, onComplete }) {
     setIsCorrect(correct);
     setResults(prev => [...prev, { wordId: currentWord.id, isCorrect: correct, answerTimeMs }]);
 
-    // placement は正誤を即表示して1秒後に次へ
     setTimeout(() => handleNext(correct, answerTimeMs), 1200);
   }
 
@@ -112,7 +107,7 @@ export default function PlacementScreen({ idToken, onComplete }) {
   async function finishPlacement() {
     setIsFinishing(true);
     try {
-      const data = await finishPlacement(results);
+      const data = await submitPlacement(results); // ← submitPlacement に変更
       onComplete(data.level);
     } catch (e) {
       Alert.alert('エラー', e.message);

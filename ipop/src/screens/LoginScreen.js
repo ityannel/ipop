@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import * as WebBrowser from 'expo-web-browser';
-import { useEffect } from 'react';
 import { auth } from '../services/firebase';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -67,15 +66,14 @@ export default function LoginScreen() {
         <Text style={styles.buttonSecondaryText}>新規登録</Text>
       </TouchableOpacity>
 
-      <View style={styles.divider}>
-        <View style={styles.dividerLine} />
-        <Text style={styles.dividerText}>または</Text>
-        <View style={styles.dividerLine} />
-      </View>
-
     </View>
   );
 }
+
+
+
+
+
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', padding: 32 },

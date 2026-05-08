@@ -12,7 +12,7 @@ const port = process.env.PORT || 3001;
 // ─────────────────────────────────────────────
 //  Constants
 // ─────────────────────────────────────────────
-const grammarSpec = fs.readFileSync(path.join(__dirname, 'i-tya-grammer.txt'), 'utf8');
+const grammarSpec = fs.readFileSync(path.join(__dirname, 'i-tya-grammar.txt'), 'utf8');
 const AI_MODEL = 'gemini-3.1-flash-lite';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const epopModel = genAI.getGenerativeModel({ 
@@ -322,6 +322,17 @@ app.get('/api/epop/due', verifyAuth, async (req, res) => {
 
     let reviewWords = [];
 
+    console.log('userLevel:', userLevel);
+    console.log('total words in cache:', dictCache.words.length);
+    console.log('learnedIds count:', learnedIds.size);
+    console.log('level distribution:', dictCache.words.reduce((acc, w) => {
+      const lv = w.level ?? 'undefined';
+      acc[lv] = (acc[lv] || 0) + 1;
+      return acc;
+    }, {}));
+    console.log('available new words:', dictCache.words.filter(w => !learnedIds.has(w.id) && (w.level||1) <= userLevel).length);
+
+
     // 通常モードの時だけ、今日の復習単語を取ってくる
     if (!isExtra) {
       const dueSnap = await db
@@ -360,6 +371,8 @@ app.get('/api/epop/due', verifyAuth, async (req, res) => {
     console.error('[/api/epop/due]', error.message);
     res.status(500).json({ error: error.message });
   }
+
+  
 });
 
 // ─────────────────────────────────────────────
@@ -505,7 +518,7 @@ app.get('/api/epop/stats', verifyAuth, async (req, res) => {
 // ─────────────────────────────────────────────
 //  Start server
 // ─────────────────────────────────────────────
-app.listen(port, () => {
+app.listen(port, '0.0.0.0', () => {
   console.log(`ipop server running on port ${port}`);
 });
 
@@ -513,3 +526,4 @@ app.get('/api/health', async (req, res) => {
   await ensureDictCache();
   res.json({ ok: true, words: dictCache.words.length, complex: dictCache.complex.length });
 });
+

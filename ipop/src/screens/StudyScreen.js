@@ -5,12 +5,11 @@ import { fetchDueWords, fetchQuestion, submitReview } from '../services/api';
 function diffChars(input, answer) {
   const maxLen = Math.max(input.length, answer.length);
   const result = [];
-  
   for (let i = 0; i < maxLen; i++) {
     if (i >= input.length) {
       result.push({ char: answer[i], status: 'missing' });
     } else if (i >= answer.length) {
-      result.push({ char: input[i], status: 'wrong' }); // 入力が多すぎる場合
+      result.push({ char: input[i], status: 'wrong' });
     } else if (input[i] === answer[i]) {
       result.push({ char: input[i], status: 'correct' });
     } else {
@@ -20,58 +19,13 @@ function diffChars(input, answer) {
   return result;
 }
 
-function parseAnnotations(line) {
-  if (!line) return [{ text: line, main: true }];
-
-  if (/^(意訳|意味|※|＊|注)[:：]/.test(line.trim())) {
-    return [{ text: line, main: false }];
-  }
-
-  const parts = [];
-  const regex = /（[ァ-ヶー・\s]+）/g;
-  let lastIndex = 0;
-  let match;
-  while ((match = regex.exec(line)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push({ text: line.slice(lastIndex, match.index), main: true });
-    }
-    parts.push({ text: match[0], main: false });
-    lastIndex = regex.lastIndex;
-  }
-  if (lastIndex < line.length) {
-    parts.push({ text: line.slice(lastIndex), main: true });
-  }
-  return parts.length > 0 ? parts : [{ text: line, main: true }];
-}
-
-function AnnotatedText({ text, mainStyle, annotationStyle }) {
-  if (!text) return null;
-  const lines = text.split('\n');
-  return (
-    <Text>
-      {lines.map((line, li) => {
-        const parts = parseAnnotations(line);
-        const allAnnotation = parts.every(p => !p.main);
-        return (
-          <Text key={li}>
-            {parts.map((p, pi) => (
-              <Text key={pi} style={p.main ? mainStyle : annotationStyle}>{p.text}</Text>
-            ))}
-            {li < lines.length - 1 ? '\n' : ''}
-          </Text>
-        );
-      })}
-    </Text>
-  );
-}
-
 export default function StudyScreen() {
   const [dueWords, setDueWords] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [question, setQuestion] = useState(null);
   const [answer, setAnswer] = useState('');
   const [userInput, setUserInput] = useState('');
-  const [hintShown, setHintShown] = useState(false);  // ヒントは1段階：押すと答え表示
+  const [hintShown, setHintShown] = useState(false);
   const [wrongCount, setWrongCount] = useState(0);
   const [isCorrect, setIsCorrect] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -79,17 +33,19 @@ export default function StudyScreen() {
   const [showDiff, setShowDiff] = useState(false);
   const startTimeRef = useRef(null);
   const inputRef = useRef(null);
+  const [isExtraMode, setIsExtraMode] = useState(false);
 
   useEffect(() => { loadDueWords(); }, []);
 
   async function loadDueWords(isExtra = false) {
     setIsLoading(true);
+    setIsExtraMode(isExtra);
     try {
       const data = await fetchDueWords(isExtra);
       const all = [...(data.review || []), ...(data.new || [])];
       setDueWords(all);
+      setCurrentIndex(0);
       if (all.length > 0) {
-        setCurrentIndex(0);
         await loadQuestion(all[0]);
       }
     } catch (e) {
@@ -98,7 +54,7 @@ export default function StudyScreen() {
       setIsLoading(false);
     }
   }
-  
+
   async function loadQuestion(word) {
     setIsLoading(true);
     setUserInput('');
@@ -119,7 +75,6 @@ export default function StudyScreen() {
     }
   }
 
-  // ヒントボタン：1回押すと答えをそのまま表示
   function handleHint() {
     setHintShown(true);
   }
@@ -145,7 +100,7 @@ export default function StudyScreen() {
         wordId: dueWords[currentIndex].id,
         isCorrect: true,
         wrongCount,
-        hintUsed: hintShown,      // boolean（サーバー側も対応済み）
+        hintUsed: hintShown,
         answerTimeMs,
         syllableCount: question.syllableCount || 2,
       });
@@ -157,6 +112,8 @@ export default function StudyScreen() {
   }
 
   async function handleNext() {
+    const nextIndex = currentIndex + 1;
+
     if (isCorrect !== true) {
       const answerTimeMs = Date.now() - startTimeRef.current;
       try {
@@ -175,15 +132,16 @@ export default function StudyScreen() {
 
     if (nextIndex >= dueWords.length) {
       Alert.alert('🎉 完了！', '学習が終わりました！', [
-        { text: 'OK', onPress: () => loadDueWords(false) }
+        { text: 'OK', onPress: () => loadDueWords(false) },
+        { text: '追加で学ぶ', onPress: () => loadDueWords(true) },
       ]);
       return;
     }
+
     setCurrentIndex(nextIndex);
     await loadQuestion(dueWords[nextIndex]);
   }
 
-  // 文字差分UI
   function renderDiff() {
     if (!showDiff || !answer) return null;
     const diff = diffChars(userInput.trim().toLowerCase(), answer.toLowerCase());
@@ -220,14 +178,12 @@ export default function StudyScreen() {
 
   function renderQuestion() {
     if (!question) return null;
-
     return (
       <View style={styles.questionArea}>
         {question.example && (
           <View style={styles.exampleCard}>
             <Text style={styles.sectionLabel}>例文</Text>
             <Text style={styles.exampleText}>{question.example}</Text>
-            {/* カタカナ読みと意訳を直接表示する */}
             {question.example_reading && (
               <Text style={styles.annotationText}>{question.example_reading}</Text>
             )}
@@ -260,28 +216,47 @@ export default function StudyScreen() {
     );
   }
 
+  const currentWord = dueWords[currentIndex];
+
   if (dueWords.length === 0) {
+  if (isExtraMode) {
     return (
       <View style={styles.center}>
-        <Text style={styles.emoji}>✅</Text>
-        <Text style={styles.doneText}>今日の学習は完了しています</Text>
-        <View style={{ flexDirection: 'row', gap: 12 }}>
-          <TouchableOpacity style={[styles.button, { flex: 0, paddingHorizontal: 24, backgroundColor: '#333' }]} onPress={() => loadDueWords(false)}>
-            <Text style={styles.buttonText}>更新</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.button, { flex: 0, paddingHorizontal: 24 }]} onPress={() => loadDueWords(true)}>
-            <Text style={styles.buttonText}>追加で学ぶ</Text>
-          </TouchableOpacity>
-        </View>
+        <Text style={styles.emoji}>✨</Text>
+        <Text style={styles.doneText}>追加できる単語がありません</Text>
+        <TouchableOpacity
+          style={[styles.button, { flex: 0, paddingHorizontal: 24 }]}
+          onPress={() => { setIsExtraMode(false); loadDueWords(false); }}
+        >
+          <Text style={styles.buttonText}>戻る</Text>
+        </TouchableOpacity>
       </View>
     );
   }
-
-  const currentWord = dueWords[currentIndex];
+  return (
+    <View style={styles.center}>
+      <Text style={styles.emoji}>✅</Text>
+      <Text style={styles.doneText}>今日の学習は完了しています</Text>
+      <View style={{ flexDirection: 'row', gap: 12 }}>
+        <TouchableOpacity
+          style={[styles.button, { flex: 0, paddingHorizontal: 24, backgroundColor: '#333' }]}
+          onPress={() => loadDueWords(false)}
+        >
+          <Text style={styles.buttonText}>更新</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.button, { flex: 0, paddingHorizontal: 24 }]}
+          onPress={() => loadDueWords(true)}
+        >
+          <Text style={styles.buttonText}>追加で学ぶ</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* 進捗バー */}
       <View style={styles.progressBarBg}>
         <View style={[styles.progressBarFill, { width: `${((currentIndex + 1) / dueWords.length) * 100}%` }]} />
       </View>
@@ -290,10 +265,8 @@ export default function StudyScreen() {
         <Text style={styles.progressBadge}>{currentWord.isNew ? '🆕 新規' : '🔁 復習'}</Text>
       </View>
 
-      {/* 問題（単語カード削除済み） */}
       {renderQuestion()}
 
-      {/* ヒント（1段階：押すと答えを表示） */}
       {hintShown && answer && (
         <View style={styles.hintCard}>
           <Text style={styles.hintLabel}>💡 答え</Text>
@@ -302,10 +275,8 @@ export default function StudyScreen() {
         </View>
       )}
 
-      {/* 差分フィードバック */}
       {renderDiff()}
 
-      {/* 入力エリア */}
       {isCorrect !== true && (
         <>
           <View style={styles.inputWrapper}>
@@ -344,7 +315,6 @@ export default function StudyScreen() {
         </>
       )}
 
-      {/* 正解 */}
       {isCorrect === true && (
         <View style={styles.correctCard}>
           <Text style={styles.correctText}>✅ 正解！</Text>
@@ -354,7 +324,6 @@ export default function StudyScreen() {
         </View>
       )}
 
-      {/* スキップ */}
       {isCorrect !== true && (
         <TouchableOpacity style={styles.skipButton} onPress={handleNext}>
           <Text style={styles.skipText}>スキップ</Text>
@@ -372,19 +341,17 @@ const styles = StyleSheet.create({
   emoji: { fontSize: 48, marginBottom: 16 },
   doneText: { color: '#fff', fontSize: 18, marginBottom: 24 },
 
-  // 進捗
   progressBarBg: { height: 4, backgroundColor: '#1a1a1a', borderRadius: 2, marginBottom: 8 },
   progressBarFill: { height: 4, backgroundColor: '#6c47ff', borderRadius: 2 },
   progressRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   progressText: { color: '#555', fontSize: 12 },
   progressBadge: { color: '#444', fontSize: 11 },
 
-  // 問題エリア
   questionArea: { marginBottom: 16 },
   exampleCard: { backgroundColor: '#111', borderRadius: 16, padding: 20, marginBottom: 10 },
   sectionLabel: { color: '#444', fontSize: 10, letterSpacing: 1.5, marginBottom: 8, textTransform: 'uppercase' },
   exampleText: { color: '#fff', fontSize: 22, lineHeight: 36, fontWeight: '500' },
-  annotationText: { color: '#3a3a3a', fontSize: 13, lineHeight: 22 },  // カタカナ振りや意訳は目立たせない
+  annotationText: { color: '#3a3a3a', fontSize: 13, lineHeight: 22 },
   blankCard: {
     backgroundColor: '#0d0d1a', borderRadius: 16, padding: 20, marginBottom: 10,
     borderWidth: 1, borderColor: '#6c47ff33',
@@ -392,9 +359,7 @@ const styles = StyleSheet.create({
   blankText: { color: '#ccc', fontSize: 20, lineHeight: 32 },
   explainCard: { backgroundColor: '#0a1a0a', borderRadius: 16, padding: 20, marginBottom: 10 },
   explainText: { color: '#aaa', fontSize: 15, lineHeight: 24 },
-  explainAnnotationText: { color: '#555', fontSize: 13, lineHeight: 20 },
 
-  // ヒント（1段階：答えをそのまま表示）
   hintCard: {
     backgroundColor: '#1a1a2e', borderRadius: 12, padding: 16, marginBottom: 12,
     flexDirection: 'row', alignItems: 'center', gap: 10,
@@ -403,7 +368,6 @@ const styles = StyleSheet.create({
   hintAnswer: { color: '#9b7cff', fontSize: 20, fontWeight: '700', letterSpacing: 1 },
   hintLength: { color: '#444', fontSize: 12, marginLeft: 'auto' },
 
-  // 差分フィードバック
   diffContainer: { marginBottom: 12, padding: 16, backgroundColor: '#1a0a0a', borderRadius: 12 },
   diffChars: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 8 },
   diffCharWrapper: { alignItems: 'center' },
@@ -417,7 +381,6 @@ const styles = StyleSheet.create({
   underlineMissing: { backgroundColor: '#333' },
   remainingText: { color: '#ff8c00', fontSize: 13 },
 
-  // 入力
   inputWrapper: { position: 'relative', marginBottom: 10 },
   input: {
     backgroundColor: '#1a1a1a', color: '#fff', borderRadius: 12,
@@ -442,12 +405,10 @@ const styles = StyleSheet.create({
   hintButtonText: { color: '#888', textAlign: 'center', fontSize: 16 },
   hintButtonTextUsed: { color: '#6c47ff' },
 
-  // 正解
   correctCard: { borderRadius: 16, padding: 20, marginBottom: 12, alignItems: 'center', gap: 16 },
   correctText: { color: '#4caf50', fontSize: 28, fontWeight: 'bold' },
   nextButton: { width: '100%', backgroundColor: '#6c47ff', borderRadius: 12, padding: 16 },
 
-  // スキップ
   skipButton: { padding: 16, alignItems: 'center' },
   skipText: { color: '#444', fontSize: 14 },
 });

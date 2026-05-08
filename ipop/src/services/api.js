@@ -1,6 +1,7 @@
 import { auth } from './firebase';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
+console.log('🔍 BASE_URL:', BASE_URL);
 
 async function getToken() {
   const user = auth.currentUser;

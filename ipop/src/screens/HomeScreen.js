@@ -26,12 +26,10 @@ export default function HomeScreen({ idToken, onStartStudy }) {
 
   const onRefresh = () => { setRefreshing(true); loadStats(); };
 
-  // 習得率
   const masteryRate = stats
     ? Math.round((stats.matureCount / Math.max(stats.totalWords, 1)) * 100)
     : 0;
 
-  // 今日やることがあるか
   const hasDue = stats && (stats.dueCount > 0 || stats.newCount > 0);
 
   if (isLoading) {
@@ -155,8 +153,8 @@ export default function HomeScreen({ idToken, onStartStudy }) {
         <Text style={styles.infoTitle}>i-tya語について</Text>
         <Text style={styles.infoText}>
           語末母音で品詞が決まる人工言語です。{'\n'}
-          <Text style={styles.infoAccent}>-a</Text> 名詞　
-          <Text style={styles.infoAccent}>-i</Text> 動詞　
+          <Text style={styles.infoAccent}>-a</Text> 名詞
+          <Text style={styles.infoAccent}>-i</Text> 動詞
           <Text style={styles.infoAccent}>-u</Text> 拡張詞
         </Text>
       </View>
@@ -178,7 +176,6 @@ const styles = StyleSheet.create({
   },
   levelText: { color: '#9b7cff', fontSize: 13, fontWeight: '600' },
 
-  // 今日の学習カード
   studyCard: {
     backgroundColor: '#6c47ff', borderRadius: 20, padding: 22, marginBottom: 20,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
