@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, RefreshControl } from 'react-native';
+// APIとAuthのコメントアウトを解除したぞ
 import { fetchStats } from '../services/api';
 import { auth } from '../services/firebase';
 
@@ -12,6 +13,7 @@ export default function HomeScreen({ idToken, onStartStudy }) {
 
   const loadStats = useCallback(async () => {
     try {
+      // 本物のAPIを叩く
       const data = await fetchStats();
       setStats(data.stats);
     } catch (e) {
@@ -47,20 +49,21 @@ export default function HomeScreen({ idToken, onStartStudy }) {
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6c47ff" />}
     >
-      {/* ロゴ */}
       <View style={styles.logoRow}>
         <Text style={styles.logo}>ipop</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <TouchableOpacity
             style={{ backgroundColor: '#1a1a1a', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: '#333' }}
-            onPress={() => auth.signOut()}
+            onPress={() => {
+                // サインアウト処理を有効化
+                auth.signOut().catch(e => console.error(e));
+            }}
           >
             <Text style={{ color: '#aaa', fontSize: 12, fontWeight: 'bold' }}>ログアウト</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* 今日の学習カード */}
       <TouchableOpacity
         style={[styles.studyCard, !hasDue && styles.studyCardDone]}
         onPress={onStartStudy}
@@ -94,7 +97,6 @@ export default function HomeScreen({ idToken, onStartStudy }) {
         <Text style={styles.studyCardArrow}>→</Text>
       </TouchableOpacity>
 
-      {/* 統計グリッド */}
       {stats && (
         <View style={styles.statsGrid}>
           <View style={styles.statCard}>
@@ -116,7 +118,6 @@ export default function HomeScreen({ idToken, onStartStudy }) {
         </View>
       )}
 
-      {/* 習得率バー */}
       {stats && stats.totalWords > 0 && (
         <View style={styles.masterySection}>
           <View style={styles.masteryLabelRow}>
@@ -143,7 +144,6 @@ export default function HomeScreen({ idToken, onStartStudy }) {
         </View>
       )}
 
-      {/* i-tya紹介 */}
       <View style={styles.infoCard}>
         <Text style={styles.infoTitle}>i-tya語について</Text>
         <Text style={styles.infoText}>
@@ -162,46 +162,25 @@ const styles = StyleSheet.create({
   content: { padding: 24, paddingTop: 60, paddingBottom: 48 },
   center: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center', gap: 12 },
   loadingText: { color: '#555', fontSize: 14 },
-
   logoRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 },
   logo: { color: '#fff', fontSize: 32, fontWeight: '800', letterSpacing: -1 },
-  levelBadge: {
-    backgroundColor: '#1a1a2e', borderRadius: 99, paddingHorizontal: 12, paddingVertical: 5,
-    borderWidth: 1, borderColor: '#6c47ff44',
-  },
-  levelText: { color: '#9b7cff', fontSize: 13, fontWeight: '600' },
-
-  studyCard: {
-    backgroundColor: '#6c47ff', borderRadius: 20, padding: 22, marginBottom: 20,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-  },
+  studyCard: { backgroundColor: '#6c47ff', borderRadius: 20, padding: 22, marginBottom: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   studyCardDone: { backgroundColor: '#1a1a1a' },
   studyCardInner: { flex: 1 },
   studyCardLabel: { color: '#fff', fontSize: 13, fontWeight: '600', marginBottom: 10, opacity: 0.85 },
   studyCardDoneText: { color: '#555', fontSize: 14 },
   studyCardArrow: { color: '#fff', fontSize: 22, fontWeight: '300', opacity: 0.7 },
   dueRow: { flexDirection: 'row', gap: 10 },
-  duePill: {
-    backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 8,
-    flexDirection: 'row', alignItems: 'baseline', gap: 5,
-  },
+  duePill: { backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8, flexDirection: 'row', alignItems: 'baseline', gap: 5 },
   duePillNew: { backgroundColor: 'rgba(255,255,255,0.15)' },
   duePillNum: { color: '#fff', fontSize: 22, fontWeight: '800' },
   duePillNumNew: { color: '#fff' },
   duePillLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
   duePillLabelNew: { color: 'rgba(255,255,255,0.8)' },
-
-  // 統計グリッド
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 },
-  statCard: {
-    flex: 1, minWidth: '45%', backgroundColor: '#111', borderRadius: 14,
-    padding: 16, borderWidth: 1, borderColor: '#1e1e1e',
-  },
+  statCard: { flex: 1, minWidth: '45%', backgroundColor: '#111', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#1e1e1e' },
   statNum: { color: '#fff', fontSize: 26, fontWeight: '700', marginBottom: 4 },
   statLabel: { color: '#555', fontSize: 12 },
-
-  // 習得率バー
   masterySection: { backgroundColor: '#111', borderRadius: 16, padding: 18, marginBottom: 20, borderWidth: 1, borderColor: '#1e1e1e' },
   masteryLabelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
   masteryLabel: { color: '#888', fontSize: 13 },
@@ -213,8 +192,6 @@ const styles = StyleSheet.create({
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendDot: { width: 8, height: 8, borderRadius: 4 },
   legendText: { color: '#555', fontSize: 11 },
-
-  // i-tya紹介
   infoCard: { backgroundColor: '#111', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#1e1e1e' },
   infoTitle: { color: '#555', fontSize: 11, letterSpacing: 1.5, marginBottom: 10, textTransform: 'uppercase' },
   infoText: { color: '#666', fontSize: 14, lineHeight: 24 },
