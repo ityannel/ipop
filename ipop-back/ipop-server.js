@@ -28,9 +28,6 @@ const BASE_TIME_MS = {
 
 const LEVEL_ORDER = { 1: 1, 2: 2, 3: 3 };
 
-// 初回レベル推定：1問あたりの制限時間(ms)
-const PLACEMENT_TIME_LIMIT = 15000;
-
 // ─────────────────────────────────────────────
 //  Firebase 初期化
 // ─────────────────────────────────────────────
@@ -104,7 +101,17 @@ async function generateQuestion(word) {
       });
       
       const text = result.response.text();
-      const parsed = JSON.parse(text);
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('AIの応答からJSONが見つかりませんでした: ' + text);
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(jsonMatch[0]);
+      } catch (e) {
+        throw new Error('AIの応答からJSONのパースに失敗しました: ' + jsonMatch[0]);
+      }
+
       return { 
         example: parsed.example,
         example_reading: parsed.example_reading,
@@ -218,89 +225,6 @@ async function verifyAuth(req, res, next) {
 }
 
 // ─────────────────────────────────────────────
-//  初回レベル推定：出題単語リストを取得
-//  GET /api/epop/placement
-//  初回のみ20問（各レベルからバランスよく）を返す
-// ─────────────────────────────────────────────
-app.get('/api/epop/placement', verifyAuth, async (req, res) => {
-  try {
-    await ensureDictCache();
-    const userId = req.userId;
-
-    // 既にplacement完了済みか確認
-    const profileRef = db.collection('epop_profiles').doc(userId);
-    const profileSnap = await profileRef.get();
-    if (profileSnap.exists && profileSnap.data().placementDone) {
-      return res.json({ success: true, alreadyDone: true, level: profileSnap.data().level });
-    }
-
-    // 各レベルから均等に計20問選ぶ
-    const level1 = dictCache.words.filter(w => w.level === 1).slice(0, 8);
-    const level2 = dictCache.words.filter(w => w.level === 2).slice(0, 7);
-    const level3 = dictCache.words.filter(w => w.level === 3).slice(0, 5);
-
-    const placementWords = [...level1, ...level2, ...level3]
-      .sort(() => Math.random() - 0.5); // シャッフル
-
-    res.json({ success: true, alreadyDone: false, words: placementWords });
-  } catch (error) {
-    console.error('[/api/epop/placement]', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ─────────────────────────────────────────────
-//  レベル推定結果を保存
-//  POST /api/epop/placement/finish
-//  Body: { results: [{ wordId, isCorrect, answerTimeMs }] }
-// ─────────────────────────────────────────────
-app.post('/api/epop/placement/finish', verifyAuth, async (req, res) => {
-  const { results } = req.body;
-  if (!results || !Array.isArray(results)) {
-    return res.status(400).json({ error: 'resultsが必要です' });
-  }
-
-  try {
-    await ensureDictCache();
-    const userId = req.userId;
-
-    // 正解率でレベルを推定
-    let correctByLevel = { 1: { correct: 0, total: 0 }, 2: { correct: 0, total: 0 }, 3: { correct: 0, total: 0 } };
-    for (const r of results) {
-      const word = getWordById(r.wordId);
-      if (!word || !word.level) continue;
-      const lv = word.level;
-      correctByLevel[lv].total++;
-      if (r.isCorrect) correctByLevel[lv].correct++;
-    }
-
-    // レベル推定ロジック：
-    // lv1正解率 < 60% → 推定lv1
-    // lv2正解率 < 60% → 推定lv2
-    // それ以上      → 推定lv3
-    let estimatedLevel = 1;
-    const rate1 = correctByLevel[1].total > 0 ? correctByLevel[1].correct / correctByLevel[1].total : 0;
-    const rate2 = correctByLevel[2].total > 0 ? correctByLevel[2].correct / correctByLevel[2].total : 0;
-    if (rate1 >= 0.6 && rate2 >= 0.6) estimatedLevel = 3;
-    else if (rate1 >= 0.6) estimatedLevel = 2;
-    else estimatedLevel = 1;
-
-    // プロファイルに保存
-    await db.collection('epop_profiles').doc(userId).set({
-      placementDone: true,
-      level: estimatedLevel,
-      placementResults: results,
-      placementAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
-
-    res.json({ success: true, level: estimatedLevel });
-  } catch (error) {
-    console.error('[/api/epop/placement/finish]', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ─────────────────────────────────────────────
 //  今日の出題単語リストを取得
 //  GET /api/epop/due
 // ─────────────────────────────────────────────
@@ -310,30 +234,22 @@ app.get('/api/epop/due', verifyAuth, async (req, res) => {
     const userId = req.userId;
     const now = admin.firestore.Timestamp.fromDate(new Date());
 
-    // 追加学習かどうかを判断
     const isExtra = req.query.extra === 'true';
 
+    // プロフィールはもうレベル管理には使わないが、統計用に一応取得
     const profileSnap = await db.collection('epop_profiles').doc(userId).get();
-    const userLevel = profileSnap.exists ? (profileSnap.data().level || 1) : 1;
+    
+    // 全員強制的に「現在のターゲットレベルは1」として扱う
+    // （将来的にレベル2をアンロックする仕様にしたいなら、ここでDBの値を参照する）
+    const userTargetLevel = profileSnap.exists && profileSnap.data().unlockedLevel ? profileSnap.data().unlockedLevel : 1;
 
-    // 【バグ修正】今日復習する単語だけじゃなく、「全学習済み単語」のIDを取得しろ！
+    // 全学習済み単語のIDを取得
     const allProgressSnap = await db.collection('epop_progress').doc(userId).collection('words').get();
     const learnedIds = new Set(allProgressSnap.docs.map(d => d.id));
 
     let reviewWords = [];
 
-    console.log('userLevel:', userLevel);
-    console.log('total words in cache:', dictCache.words.length);
-    console.log('learnedIds count:', learnedIds.size);
-    console.log('level distribution:', dictCache.words.reduce((acc, w) => {
-      const lv = w.level ?? 'undefined';
-      acc[lv] = (acc[lv] || 0) + 1;
-      return acc;
-    }, {}));
-    console.log('available new words:', dictCache.words.filter(w => !learnedIds.has(w.id) && (w.level||1) <= userLevel).length);
-
-
-    // 通常モードの時だけ、今日の復習単語を取ってくる
+    // 通常モード：今日の復習単語を取得
     if (!isExtra) {
       const dueSnap = await db
         .collection('epop_progress')
@@ -352,11 +268,19 @@ app.get('/api/epop/due', verifyAuth, async (req, res) => {
         .filter(Boolean);
     }
 
-    // 新規単語の取得（追加学習なら10問、通常なら5問）
+    // ▼▼ 新規単語の抽出ロジック（未学習 ＆ レベル1 ＆ ランダム） ▼▼
     const newLimit = isExtra ? 10 : 5;
-    const newWords = dictCache.words
-      .filter(w => w.id && !learnedIds.has(w.id) && (w.level || 1) <= userLevel)
-      .sort((a, b) => (LEVEL_ORDER[a.level] || 99) - (LEVEL_ORDER[b.level] || 99))
+    
+    // 1. 未学習かつ、現在のターゲットレベル「以下」の単語を全てフィルタリング
+    const availableNewWords = dictCache.words.filter(w => 
+      !learnedIds.has(w.id) && (w.level || 1) <= userTargetLevel
+    );
+
+    // 2. 配列をランダムにシャッフルする
+    const shuffledNewWords = availableNewWords.sort(() => Math.random() - 0.5);
+
+    // 3. 必要な数だけ切り出す
+    const newWords = shuffledNewWords
       .slice(0, newLimit)
       .map(w => ({ ...w, progress: null, isNew: true }));
 
@@ -365,14 +289,12 @@ app.get('/api/epop/due', verifyAuth, async (req, res) => {
       review: reviewWords,
       new: newWords,
       total: reviewWords.length + newWords.length,
-      userLevel,
+      userLevel: userTargetLevel, // 画面表示用
     });
   } catch (error) {
     console.error('[/api/epop/due]', error.message);
     res.status(500).json({ error: error.message });
   }
-
-  
 });
 
 // ─────────────────────────────────────────────
@@ -526,4 +448,3 @@ app.get('/api/health', async (req, res) => {
   await ensureDictCache();
   res.json({ ok: true, words: dictCache.words.length, complex: dictCache.complex.length });
 });
-

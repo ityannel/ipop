@@ -51,11 +51,6 @@ export default function HomeScreen({ idToken, onStartStudy }) {
       <View style={styles.logoRow}>
         <Text style={styles.logo}>ipop</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          {stats?.userLevel && (
-            <View style={styles.levelBadge}>
-              <Text style={styles.levelText}>{LEVEL_LABELS[stats.userLevel] || 'Lv' + stats.userLevel}</Text>
-            </View>
-          )}
           <TouchableOpacity
             style={{ backgroundColor: '#1a1a1a', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: '#333' }}
             onPress={() => auth.signOut()}
