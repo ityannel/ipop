@@ -1,6 +1,13 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { initializeAuth, getReactNativePersistence, GoogleAuthProvider } from 'firebase/auth';
+import { 
+  initializeAuth, 
+  getAuth, 
+  getReactNativePersistence, 
+  browserLocalPersistence, 
+  GoogleAuthProvider 
+} from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 const firebaseConfig = {
   apiKey: "AIzaSyDXsyhPMGPDQ-lahJy-0vQvq10WKOSR468",
@@ -13,8 +20,19 @@ const firebaseConfig = {
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
-export const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(AsyncStorage),
-});
+// すでに初期化済みの場合は getAuth で取得（二重初期化エラーを防ぐ）
+let auth;
+try {
+  const persistence = Platform.OS === 'web' 
+    ? browserLocalPersistence 
+    : getReactNativePersistence(AsyncStorage);
+    
+  auth = initializeAuth(app, {
+    persistence: persistence,
+  });
+} catch (e) {
+  auth = getAuth(app);
+}
 
+export { auth };
 export const googleProvider = new GoogleAuthProvider();

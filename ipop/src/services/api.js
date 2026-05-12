@@ -3,10 +3,25 @@ import { auth } from './firebase';
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
 console.log('🔍 BASE_URL:', BASE_URL);
 
-async function getToken() {
-  const user = auth.currentUser;
-  if (!user) throw new Error('ログインしていません');
-  return user.getIdToken();
+// auth.currentUser は Firebase 初期化直後は null の場合があるため、
+// onAuthStateChanged で準備完了を待ってからトークンを取得する
+function getToken() {
+  return new Promise((resolve, reject) => {
+    // すでにログイン済みであればそのまま取得
+    if (auth.currentUser) {
+      auth.currentUser.getIdToken().then(resolve).catch(reject);
+      return;
+    }
+    // 初期化中の場合は状態確定まで待機（1回だけ購読してすぐ解除）
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      unsubscribe();
+      if (user) {
+        user.getIdToken().then(resolve).catch(reject);
+      } else {
+        reject(new Error('ログインしていません'));
+      }
+    });
+  });
 }
 
 export async function fetchDueWords(extra = false) {
@@ -56,7 +71,16 @@ export async function fetchPlacement() {
   return res.json();
 }
 
-export async function finishPlacement(results) {
+export async function migrateQuestions() {
+  const token = await getToken();
+  const res = await fetch(`${BASE_URL}/api/epop/migrate-questions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+  });
+  return res.json();
+}
+
+export async function submitPlacement(results) {
   const token = await getToken();
   const res = await fetch(`${BASE_URL}/api/epop/placement/finish`, {
     method: 'POST',

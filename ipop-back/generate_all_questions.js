@@ -48,18 +48,19 @@ async function runInfiniteLoop() {
       const forms = [word.word_noun, word.word_verb, word.word_extender, word.combination].filter(Boolean).join(', ');
 
       const prompt = `以下の単語の穴埋め問題を必ずJSON形式のみで出力してください。Markdownのコードブロック( \`\`\`json など )は使用しないでください。
-概念: ${wordName}, レベル: ${wordLevel}, 形態: ${forms}
-【辞書リスト】: ${dictListStr}
+      概念: ${wordName}, レベル: ${wordLevel}, 形態: ${forms}
+      【辞書リスト】: ${dictListStr}
 
-出力形式は以下のJSON構造に厳密に従うこと：
-{
-  "example": "i-tya言語の例文",
-  "example_reading": "例文の読み方(ローマ字など)",
-  "example_translation": "例文の日本語訳",
-  "blank": "穴埋めにする単語",
-  "explanation": "問題の解説",
-  "answer": "正解の単語"
-}`;
+      出力形式は以下のJSON構造に厳密に従うこと：
+      {
+        "example": "i-tya言語での例文",
+        "example_reading": "例文の読み方(カタカナ)",
+        "example_translation": "例文の日本語訳",
+        "translation_blank": "example_translationの中でanswerに対応する日本語の単語または句をそのまま抜き出したもの（必ずexample_translationに含まれる部分文字列）",
+        "blank": "穴埋めにする単語（かならず、単語の一部などではなく単語の全部です。）",
+        "explanation": "問題の解説",
+        "answer": "正解の単語"
+      }`;
 
       try {
         const result = await epopModel.generateContent(prompt);
@@ -76,16 +77,15 @@ async function runInfiniteLoop() {
         }
 
         await db.collection('epop_questions').doc(word.id).set({
-            question: { 
-              example: parsed.example, 
-              example_reading: parsed.example_reading, 
-              example_translation: parsed.example_translation, 
-              blank: parsed.blank, 
-              explanation: parsed.explanation 
-            },
-            answer: parsed.answer,
-            wordId: word.id,
-            generatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            example:             parsed.example,
+            example_reading:     parsed.example_reading,
+            example_translation: parsed.example_translation,
+            translation_blank:   parsed.translation_blank ?? null,
+            blank:               parsed.blank,
+            explanation:         parsed.explanation,
+            answer:              parsed.answer,
+            wordId:              word.id,
+            generatedAt:         admin.firestore.FieldValue.serverTimestamp(),
         });
 
         console.log(wordName);

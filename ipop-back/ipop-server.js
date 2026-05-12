@@ -90,10 +90,13 @@ async function generateQuestion(word) {
       "example": "(i-tyaの例文)",
       "example_reading": "(例文のカタカナ読み)",
       "example_translation": "(例文の日本語意訳)",
+      "translation_blank": "(example_translationの中で、answerに対応する日本語の単語または句をそのまま抜き出したもの)",
       "blank": "(対象単語を＿＿に置き換えた文)",
       "answer": "(伏せた単語のみ)",
       "explanation": "(意味・語形のポイントを日本語で2〜3文)"
-    }`;
+    }
+    
+    translation_blankはexample_translationの文字列に必ず含まれる部分文字列にしてください。`;
 
       const result = await epopModel.generateContent({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -113,12 +116,13 @@ async function generateQuestion(word) {
       }
 
       return { 
-        example: parsed.example,
-        example_reading: parsed.example_reading,
+        example:             parsed.example,
+        example_reading:     parsed.example_reading,
         example_translation: parsed.example_translation,
-        blank: parsed.blank, 
-        answer: parsed.answer, 
-        explanation: parsed.explanation
+        translation_blank:   parsed.translation_blank ?? null,
+        blank:               parsed.blank, 
+        answer:              parsed.answer, 
+        explanation:         parsed.explanation,
       };
     }
 
@@ -132,21 +136,57 @@ async function getOrGenerateQuestion(wordId) {
   if (snap.exists) {
     console.log(`[QUESTION] Cache hit: ${wordId}`);
     const d = snap.data();
-    return { question: d.question, answer: d.answer };
+    // 旧データ（questionフィールド構造）との後方互換
+    if (d.example) {
+      return {
+        question: {
+          example:             d.example,
+          example_reading:     d.example_reading,
+          example_translation: d.example_translation,
+          translation_blank:   d.translation_blank ?? null,
+          blank:               d.blank,
+        },
+        answer: d.answer,
+      };
+    }
+    // さらに古い形式: question がネストオブジェクトで保存されていた場合
+    if (d.question) {
+      return {
+        question: {
+          ...d.question,
+          translation_blank: d.question.translation_blank ?? null,
+        },
+        answer: d.answer,
+      };
+    }
   }
 
   console.log(`[QUESTION] Generating for: ${wordId}`);
   const generated = await generateQuestion(word);
 
-  // DBに保存して次回から再利用
+  // フラットに保存（取り出しやすく）
   await ref.set({
-    question: generated.question,
-    answer:   generated.answer,
+    example:             generated.example,
+    example_reading:     generated.example_reading,
+    example_translation: generated.example_translation,
+    translation_blank:   generated.translation_blank ?? null,
+    blank:               generated.blank,
+    answer:              generated.answer,
+    explanation:         generated.explanation,
     wordId,
     generatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 
-  return generated;
+  return {
+    question: {
+      example:             generated.example,
+      example_reading:     generated.example_reading,
+      example_translation: generated.example_translation,
+      translation_blank:   generated.translation_blank ?? null,
+      blank:               generated.blank,
+    },
+    answer: generated.answer,
+  };
 }
 
 // ─────────────────────────────────────────────
@@ -257,15 +297,38 @@ app.get('/api/epop/due', verifyAuth, async (req, res) => {
         .collection('words')
         .where('nextReview', '<=', now)
         .orderBy('nextReview')
-        .limit(20)
+        .limit(7)
         .get();
 
-      reviewWords = dueSnap.docs
+      const rawReviewWords = dueSnap.docs
         .map(doc => {
           const word = getWordById(doc.id);
-          return word ? { ...word, progress: doc.data(), isNew: false } : null;
+          if (!word) return null;
+          const progress = doc.data();
+          return {
+            ...word,
+            progress,
+            isNew: false,
+            next_review: progress.nextReview ? progress.nextReview.toDate().toISOString() : null,
+          };
         })
         .filter(Boolean);
+
+      // DBに問題キャッシュが存在する単語だけに絞る
+      const reviewIds = rawReviewWords.map(w => w.id);
+      let reviewCachedIds = new Set();
+      if (reviewIds.length > 0) {
+        const chunkSize = 30;
+        for (let i = 0; i < reviewIds.length; i += chunkSize) {
+          const chunk = reviewIds.slice(i, i + chunkSize);
+          const qSnap = await db.collection('epop_questions')
+            .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+            .select()
+            .get();
+          qSnap.docs.forEach(d => reviewCachedIds.add(d.id));
+        }
+      }
+      reviewWords = rawReviewWords.filter(w => reviewCachedIds.has(w.id));
     }
 
     // ▼▼ 新規単語の抽出ロジック（未学習 ＆ レベル1 ＆ ランダム） ▼▼
@@ -276,11 +339,26 @@ app.get('/api/epop/due', verifyAuth, async (req, res) => {
       !learnedIds.has(w.id) && (w.level || 1) <= userTargetLevel
     );
 
-    // 2. 配列をランダムにシャッフルする
-    const shuffledNewWords = availableNewWords.sort(() => Math.random() - 0.5);
+    // 2. DBに問題キャッシュが存在する単語だけに絞る（AI生成不要 = 429回避）
+    const availableIds = availableNewWords.map(w => w.id);
+    let cachedIds = new Set();
+    if (availableIds.length > 0) {
+      const chunkSize = 30;
+      for (let i = 0; i < availableIds.length; i += chunkSize) {
+        const chunk = availableIds.slice(i, i + chunkSize);
+        const qSnap = await db.collection('epop_questions')
+          .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+          .select()
+          .get();
+        qSnap.docs.forEach(d => cachedIds.add(d.id));
+      }
+    }
 
-    // 3. 必要な数だけ切り出す
-    const newWords = shuffledNewWords
+    const cachedNewWords = availableNewWords.filter(w => cachedIds.has(w.id));
+
+    // 3. 配列をランダムにシャッフルして必要数だけ切り出す
+    const newWords = cachedNewWords
+      .sort(() => Math.random() - 0.5)
       .slice(0, newLimit)
       .map(w => ({ ...w, progress: null, isNew: true }));
 
@@ -314,7 +392,17 @@ app.post('/api/epop/pop', verifyAuth, async (req, res) => {
     const { question, answer } = await getOrGenerateQuestion(wordId);
     const syllableCount = countSyllables(getPrimaryForm(word));
 
-    res.json({ success: true, question, answer, wordId, syllableCount });
+    // explanationはDBからも取得（getOrGenerateQuestion経由で返さないためここで補完）
+    const snap = await db.collection('epop_questions').doc(wordId).get();
+    const explanation = snap.exists ? (snap.data().explanation ?? '') : '';
+
+    res.json({
+      success: true,
+      question: { ...question, explanation },
+      answer,
+      wordId,
+      syllableCount,
+    });
   } catch (error) {
     console.error('[/api/epop/pop]', error.message);
     res.status(500).json({ error: error.message });
@@ -339,14 +427,32 @@ app.post('/api/epop/pop/regenerate', verifyAuth, async (req, res) => {
     const generated = await generateQuestion(word);
 
     await db.collection('epop_questions').doc(wordId).set({
-      question: generated.question,
-      answer:   generated.answer,
+      example:             generated.example,
+      example_reading:     generated.example_reading,
+      example_translation: generated.example_translation,
+      translation_blank:   generated.translation_blank ?? null,
+      blank:               generated.blank,
+      answer:              generated.answer,
+      explanation:         generated.explanation,
       wordId,
       generatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
     const syllableCount = countSyllables(getPrimaryForm(word));
-    res.json({ success: true, question: generated.question, answer: generated.answer, wordId, syllableCount });
+    res.json({
+      success: true,
+      question: {
+        example:             generated.example,
+        example_reading:     generated.example_reading,
+        example_translation: generated.example_translation,
+        translation_blank:   generated.translation_blank ?? null,
+        blank:               generated.blank,
+        explanation:         generated.explanation,
+      },
+      answer: generated.answer,
+      wordId,
+      syllableCount,
+    });
   } catch (error) {
     console.error('[/api/epop/pop/regenerate]', error.message);
     res.status(500).json({ error: error.message });
@@ -407,16 +513,47 @@ app.get('/api/epop/stats', verifyAuth, async (req, res) => {
     ]);
 
     const totalWords = dictCache.words.length + dictCache.complex.length;
+    const learnedIds = new Set(progressSnap.docs.map(d => d.id));
     const learnedCount = progressSnap.size;
     const now = new Date();
 
-    let dueCount = 0;
+    const dueIds = [];
     let matureCount = 0;
 
     for (const doc of progressSnap.docs) {
       const d = doc.data();
-      if (d.nextReview && d.nextReview.toDate() <= now) dueCount++;
+      if (d.nextReview && d.nextReview.toDate() <= now) dueIds.push(doc.id);
       if (d.interval >= 21) matureCount++;
+    }
+
+    // dueCount: キャッシュ済みのみカウント
+    let cachedDueCount = 0;
+    if (dueIds.length > 0) {
+      const chunkSize = 30;
+      for (let i = 0; i < dueIds.length; i += chunkSize) {
+        const chunk = dueIds.slice(i, i + chunkSize);
+        const qSnap = await db.collection('epop_questions')
+          .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+          .select().get();
+        cachedDueCount += qSnap.size;
+      }
+    }
+
+    // newCount: キャッシュ済みの未学習単語数
+    const unlearnedIds = dictCache.words
+      .filter(w => !learnedIds.has(w.id))
+      .map(w => w.id);
+
+    let cachedNewCount = 0;
+    if (unlearnedIds.length > 0) {
+      const chunkSize = 30;
+      for (let i = 0; i < unlearnedIds.length; i += chunkSize) {
+        const chunk = unlearnedIds.slice(i, i + chunkSize);
+        const qSnap = await db.collection('epop_questions')
+          .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+          .select().get();
+        cachedNewCount += qSnap.size;
+      }
     }
 
     res.json({
@@ -425,14 +562,144 @@ app.get('/api/epop/stats', verifyAuth, async (req, res) => {
         totalWords,
         learnedCount,
         matureCount,
-        dueCount,
-        newCount: totalWords - learnedCount,
+        dueCount: cachedDueCount,
+        newCount: Math.min(cachedNewCount, 5),
         userLevel: profileSnap.exists ? (profileSnap.data().level || 1) : null,
         placementDone: profileSnap.exists ? !!profileSnap.data().placementDone : false,
       },
     });
   } catch (error) {
     console.error('[/api/epop/stats]', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+//  既存問題データのマイグレーション（旧形式 → 新フラット形式）
+//  POST /api/epop/migrate-questions
+//  ※ 管理者用。一度実行すれば不要
+// ─────────────────────────────────────────────
+app.post('/api/epop/migrate-questions', verifyAuth, async (req, res) => {
+  try {
+    const snap = await db.collection('epop_questions').get();
+    let migrated = 0;
+    let skipped  = 0;
+    const batch  = db.batch();
+
+    for (const doc of snap.docs) {
+      const d = doc.data();
+
+      // すでに新形式（example フィールドがトップレベルにある）ならスキップ
+      if (d.example) { skipped++; continue; }
+
+      // 旧形式: question がネストオブジェクト
+      const q = d.question;
+      if (!q) { skipped++; continue; }
+
+      batch.set(doc.ref, {
+        example:             q.example             ?? '',
+        example_reading:     q.example_reading     ?? '',
+        example_translation: q.example_translation ?? '',
+        translation_blank:   q.translation_blank   ?? null,
+        blank:               q.blank               ?? '',
+        answer:              d.answer              ?? '',
+        explanation:         q.explanation         ?? '',
+        wordId:              d.wordId,
+        generatedAt:         d.generatedAt,
+        migratedAt:          admin.firestore.FieldValue.serverTimestamp(),
+      });
+      migrated++;
+    }
+
+    await batch.commit();
+    console.log(`[MIGRATE] migrated=${migrated}, skipped=${skipped}`);
+    res.json({ success: true, migrated, skipped });
+  } catch (error) {
+    console.error('[/api/epop/migrate-questions]', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+//  プレイスメントテスト用
+// ─────────────────────────────────────────────
+app.get('/api/epop/placement', verifyAuth, async (req, res) => {
+  try {
+    await ensureDictCache();
+    const profileSnap = await db.collection('epop_profiles').doc(req.userId).get();
+    
+    if (profileSnap.exists && profileSnap.data().placementDone) {
+      return res.json({ success: true, alreadyDone: true, level: profileSnap.data().unlockedLevel || 1 });
+    }
+
+    // 各レベルから数問ずつランダムに抽出
+    const placementWords = [];
+    for (let lv = 1; lv <= 3; lv++) {
+      const lvWords = dictCache.words.filter(w => (w.level || 1) === lv);
+      const shuffled = lvWords.sort(() => Math.random() - 0.5).slice(0, 3);
+      placementWords.push(...shuffled);
+    }
+
+    res.json({ success: true, alreadyDone: false, words: placementWords });
+  } catch (error) {
+    console.error('[/api/epop/placement]', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/epop/placement/finish', verifyAuth, async (req, res) => {
+  const { results } = req.body;
+  if (!results) return res.status(400).json({ error: 'resultsが必要です' });
+
+  try {
+    // 正解数に応じて初期レベルを決定
+    const correctCount = results.filter(r => r.isCorrect).length;
+    let level = 1;
+    if (correctCount >= 7) level = 3;
+    else if (correctCount >= 4) level = 2;
+
+    await db.collection('epop_profiles').doc(req.userId).set({
+      placementDone: true,
+      unlockedLevel: level,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    res.json({ success: true, level });
+  } catch (error) {
+    console.error('[/api/epop/placement/finish]', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/epop/cache-all', verifyAuth, async (req, res) => {
+  try {
+    await ensureDictCache();
+    const allWords = [...dictCache.words, ...dictCache.complex];
+    
+    let generated = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const word of allWords) {
+      try {
+        const snap = await db.collection('epop_questions').doc(word.id).get();
+        if (snap.exists) { skipped++; continue; }
+
+        await getOrGenerateQuestion(word.id);
+        generated++;
+        console.log(`[CACHE-ALL] generated: ${word.id} (${generated}/${allWords.length})`);
+
+        // Gemini のレート制限対策
+        await new Promise(r => setTimeout(r, 1000));
+      } catch (e) {
+        console.error(`[CACHE-ALL] failed: ${word.id}`, e.message);
+        failed++;
+      }
+    }
+
+    res.json({ success: true, generated, skipped, failed, total: allWords.length });
+  } catch (error) {
+    console.error('[/api/epop/cache-all]', error.message);
     res.status(500).json({ error: error.message });
   }
 });

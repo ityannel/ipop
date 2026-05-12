@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { fetchPlacement, fetchQuestion, submitPlacement } from '../services/api';
+import { FONT, COLORS } from '../constants/theme';
+import Chara from '../chara.svg';
+
+const C = COLORS;
 
 export default function PlacementScreen({ idToken, onComplete }) {
   const [words, setWords] = useState([]);
@@ -35,6 +39,7 @@ export default function PlacementScreen({ idToken, onComplete }) {
   }
 
   async function loadQuestion(word, allWords) {
+    if (!word) return;
     try {
       const data = await fetchQuestion(word.id);
       setQuestions(prev => ({
@@ -71,6 +76,7 @@ export default function PlacementScreen({ idToken, onComplete }) {
 
   async function handleSubmit() {
     if (!userInput.trim()) return;
+    const currentWord = words[currentIndex];
     const qData = questions[currentWord.id];
     if (!qData) return;
 
@@ -107,7 +113,7 @@ export default function PlacementScreen({ idToken, onComplete }) {
   async function finishPlacement() {
     setIsFinishing(true);
     try {
-      const data = await submitPlacement(results); // ← submitPlacement に変更
+      const data = await submitPlacement(results);
       onComplete(data.level);
     } catch (e) {
       Alert.alert('エラー', e.message);
@@ -118,11 +124,15 @@ export default function PlacementScreen({ idToken, onComplete }) {
 
   if (isLoading || isFinishing) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.loadingEmoji}>{isFinishing ? '🎯' : '⏳'}</Text>
-        <Text style={styles.loadingText}>
+      <View style={styles.loadingRoot}>
+        <Text style={styles.loadingLogo}>ipop</Text>
+        <View style={styles.loadingChara}>
+          <Chara width={160} height={160} />
+        </View>
+        <Text style={styles.statusLabel}>
           {isFinishing ? 'レベルを計算中...' : '読み込み中...'}
         </Text>
+        <ActivityIndicator color={C.green} size="small" style={{ marginTop: 20, opacity: 0.5 }} />
       </View>
     );
   }
@@ -224,15 +234,37 @@ const styles = StyleSheet.create({
   content: { padding: 24, paddingTop: 56, paddingBottom: 48 },
   center: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center', gap: 12 },
   loadingEmoji: { fontSize: 40 },
+  loadingRoot: {
+    flex: 1,
+    backgroundColor: COLORS.bg,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingLogo: {
+    color: COLORS.green,
+    fontSize: 72,
+    fontFamily: FONT.en,
+    marginBottom: 20,
+  },
+  loadingChara: {
+    transform: [{ scale: 1.1 }],
+  },
+  statusLabel: {
+    color: COLORS.green,
+    fontSize: 16,
+    fontFamily: FONT.jp,
+    marginTop: 20,
+    opacity: 0.8,
+  },
   loadingText: { color: '#888', fontSize: 15 },
 
   header: { marginBottom: 24 },
-  headerTitle: { color: '#fff', fontSize: 22, fontWeight: 'bold', marginBottom: 4 },
-  headerSub: { color: '#555', fontSize: 14 },
+  headerTitle: { color: COLORS.white, fontSize: 22, marginBottom: 4, fontFamily: FONT.en },
+  headerSub: { color: '#555', fontSize: 14, fontFamily: FONT.jp },
 
   progressBarBg: { height: 4, backgroundColor: '#1a1a1a', borderRadius: 2, marginBottom: 8 },
-  progressBarFill: { height: 4, backgroundColor: '#6c47ff', borderRadius: 2 },
-  progressText: { color: '#555', fontSize: 12, textAlign: 'right', marginBottom: 20 },
+  progressBarFill: { height: 4, backgroundColor: COLORS.accent, borderRadius: 2 },
+  progressText: { color: '#555', fontSize: 12, textAlign: 'right', marginBottom: 20, fontFamily: FONT.en },
 
   conceptBadge: {
     alignSelf: 'flex-start',
@@ -244,41 +276,42 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#6c47ff44',
   },
-  conceptText: { color: '#9b7cff', fontSize: 14 },
+  conceptText: { color: '#9b7cff', fontSize: 14, fontFamily: FONT.jpBd },
 
   exampleCard: { backgroundColor: '#111', borderRadius: 16, padding: 20, marginBottom: 10 },
-  sectionLabel: { color: '#444', fontSize: 10, letterSpacing: 1.5, marginBottom: 8, textTransform: 'uppercase' },
-  exampleText: { color: '#fff', fontSize: 20, lineHeight: 34, fontWeight: '500' },
+  sectionLabel: { color: '#444', fontSize: 10, letterSpacing: 1.5, marginBottom: 8, textTransform: 'uppercase', ...FONT.enVar },
+  exampleText: { color: COLORS.white, fontSize: 20, lineHeight: 34, fontFamily: FONT.jp },
 
   blankCard: {
     backgroundColor: '#0d0d1a', borderRadius: 16, padding: 20, marginBottom: 16,
     borderWidth: 1, borderColor: '#6c47ff33',
   },
-  blankText: { color: '#ccc', fontSize: 18, lineHeight: 30 },
+  blankText: { color: '#ccc', fontSize: 18, lineHeight: 30, fontFamily: FONT.jp },
 
   feedbackCard: { borderRadius: 14, padding: 16, marginBottom: 16, alignItems: 'center' },
   feedbackCorrect: { backgroundColor: '#0b1f0c' },
   feedbackWrong: { backgroundColor: '#1f0b0b' },
-  feedbackText: { fontSize: 18, fontWeight: 'bold' },
+  feedbackText: { fontSize: 18, fontFamily: FONT.jpBd },
   feedbackTextCorrect: { color: '#4caf50' },
   feedbackTextWrong: { color: '#ff5555' },
 
   inputWrapper: { position: 'relative', marginBottom: 10 },
   input: {
-    backgroundColor: '#1a1a1a', color: '#fff', borderRadius: 12,
+    backgroundColor: '#1a1a1a', color: COLORS.white, borderRadius: 12,
     paddingVertical: 16, paddingLeft: 16, paddingRight: 70,
     fontSize: 20, borderWidth: 1, borderColor: '#333',
+    fontFamily: FONT.en,
   },
   charCountText: {
     position: 'absolute', right: 14, top: 0, bottom: 0,
     textAlignVertical: 'center', color: '#444', fontSize: 12,
-    lineHeight: 56,
+    lineHeight: 56, fontFamily: FONT.en,
   },
 
-  button: { backgroundColor: '#6c47ff', borderRadius: 12, padding: 16, marginBottom: 10 },
+  button: { backgroundColor: COLORS.accent, borderRadius: 12, padding: 16, marginBottom: 10 },
   buttonDisabled: { backgroundColor: '#2a2a2a' },
-  buttonText: { color: '#fff', textAlign: 'center', fontSize: 16, fontWeight: 'bold' },
+  buttonText: { color: COLORS.white, textAlign: 'center', fontSize: 16, fontFamily: FONT.jpBd },
 
   skipButton: { padding: 12, alignItems: 'center' },
-  skipText: { color: '#444', fontSize: 13 },
+  skipText: { color: '#444', fontSize: 13, fontFamily: FONT.jp },
 });
