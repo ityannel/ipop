@@ -20,6 +20,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#4A1C53"
       },
+      "icon": "./assets/icon.png",
       "edgeToEdgeEnabled": true,
       "package": "com.ityan.ipop",
       "googleServicesFile": "./google-services.json"
@@ -30,6 +31,11 @@
     "plugins": [
       "expo-web-browser",
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "bb42f64d-d3ec-4056-a36b-52697b1cb6e2"
+      }
+    }
   }
 }

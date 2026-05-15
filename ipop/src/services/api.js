@@ -1,24 +1,21 @@
 import { auth } from './firebase';
 
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
-console.log('🔍 BASE_URL:', BASE_URL);
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://10.0.2.2:3001';
+console.log(`[API] Using BASE_URL: ${BASE_URL}`);
 
-// auth.currentUser は Firebase 初期化直後は null の場合があるため、
-// onAuthStateChanged で準備完了を待ってからトークンを取得する
+// トークン取得（初期化待機を含む）
 function getToken() {
   return new Promise((resolve, reject) => {
-    // すでにログイン済みであればそのまま取得
     if (auth.currentUser) {
       auth.currentUser.getIdToken().then(resolve).catch(reject);
       return;
     }
-    // 初期化中の場合は状態確定まで待機（1回だけ購読してすぐ解除）
     const unsubscribe = auth.onAuthStateChanged((user) => {
       unsubscribe();
       if (user) {
         user.getIdToken().then(resolve).catch(reject);
       } else {
-        reject(new Error('ログインしていません'));
+        reject(new Error('未認証'));
       }
     });
   });
@@ -27,12 +24,19 @@ function getToken() {
 export async function fetchDueWords(extra = false) {
   const token = await getToken();
   const url = extra ? `${BASE_URL}/api/epop/due?extra=true` : `${BASE_URL}/api/epop/due`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const data = await res.json();
-  if (!data.success && data.error) throw new Error(data.error);
-  return data;
+  console.log(`[API] Fetching due words from: ${url}`);
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    console.log(`[API] Due words response status: ${res.status}`);
+    const data = await res.json();
+    if (!data.success && data.error) throw new Error(data.error);
+    return data;
+  } catch (e) {
+    console.error(`[API] fetchDueWords failed for ${url}:`, e);
+    throw e;
+  }
 }
 
 export async function fetchQuestion(wordId) {
@@ -57,10 +61,18 @@ export async function submitReview(data) {
 
 export async function fetchStats() {
   const token = await getToken();
-  const res = await fetch(`${BASE_URL}/api/epop/stats`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  return res.json();
+  const url = `${BASE_URL}/api/epop/stats`;
+  console.log(`[API] Fetching stats from: ${url}`);
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    console.log(`[API] Stats response status: ${res.status}`);
+    return res.json();
+  } catch (e) {
+    console.error(`[API] fetchStats failed for ${url}:`, e);
+    throw e;
+  }
 }
 
 export async function fetchPlacement() {

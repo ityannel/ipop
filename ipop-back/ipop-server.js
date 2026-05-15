@@ -9,9 +9,7 @@ const path = require('path')
 const app = express();
 const port = process.env.PORT || 3001;
 
-// ─────────────────────────────────────────────
-//  Constants
-// ─────────────────────────────────────────────
+// 定数の定義
 const grammarSpec = fs.readFileSync(path.join(__dirname, 'i-tya-grammar.txt'), 'utf8');
 const AI_MODEL = 'gemini-3.1-flash-lite';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -28,17 +26,13 @@ const BASE_TIME_MS = {
 
 const LEVEL_ORDER = { 1: 1, 2: 2, 3: 3 };
 
-// ─────────────────────────────────────────────
-//  Firebase 初期化
-// ─────────────────────────────────────────────
+// Firebaseの初期化
 const serviceAccount = require('./serviceAccountKey.json');
 admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
 db.settings({ ignoreUndefinedProperties: true });
 
-// ─────────────────────────────────────────────
-//  辞書キャッシュ（12時間TTL）
-// ─────────────────────────────────────────────
+// 辞書キャッシュ（有効期限：12時間）
 const CACHE_TTL = 12 * 60 * 60 * 1000;
 const dictCache = { words: [], complex: [], loadedAt: 0 };
 
@@ -136,7 +130,7 @@ async function getOrGenerateQuestion(wordId) {
   if (snap.exists) {
     console.log(`[QUESTION] Cache hit: ${wordId}`);
     const d = snap.data();
-    // 旧データ（questionフィールド構造）との後方互換
+    // 旧データ形式への互換性維持
     if (d.example) {
       return {
         question: {
@@ -149,7 +143,7 @@ async function getOrGenerateQuestion(wordId) {
         answer: d.answer,
       };
     }
-    // さらに古い形式: question がネストオブジェクトで保存されていた場合
+    // 旧形式の入れ子構造への互換性維持
     if (d.question) {
       return {
         question: {
@@ -164,7 +158,7 @@ async function getOrGenerateQuestion(wordId) {
   console.log(`[QUESTION] Generating for: ${wordId}`);
   const generated = await generateQuestion(word);
 
-  // フラットに保存（取り出しやすく）
+  // 平坦形式による保存
   await ref.set({
     example:             generated.example,
     example_reading:     generated.example_reading,
@@ -189,9 +183,7 @@ async function getOrGenerateQuestion(wordId) {
   };
 }
 
-// ─────────────────────────────────────────────
-//  SM-2 アルゴリズム
-// ─────────────────────────────────────────────
+// SM-2アルゴリズムの定義
 function sm2(card, quality) {
   let { easinessFactor = 2.5, interval = 1, repetitions = 0 } = card;
 
@@ -216,9 +208,7 @@ function sm2(card, quality) {
   return { easinessFactor, interval, repetitions, nextReview };
 }
 
-// ─────────────────────────────────────────────
-//  自動スコアリング
-// ─────────────────────────────────────────────
+// 自動採点設定
 function calcQuality({ isCorrect, wrongCount, hintUsed, answerTimeMs, syllableCount }) {
   if (!isCorrect || wrongCount >= 2) return 0;
   if (wrongCount === 1) return 1;
@@ -232,22 +222,48 @@ function calcQuality({ isCorrect, wrongCount, hintUsed, answerTimeMs, syllableCo
   return 5;
 }
 
-// ─────────────────────────────────────────────
-//  Middleware
-// ─────────────────────────────────────────────
+// 継続日数の更新（日本標準時基準）
+function getJSTDate(date = new Date()) {
+  // 協定世界時から日本標準時への換算
+  const jstNow = new Date(date.getTime() + (9 * 60 * 60 * 1000));
+  return jstNow.toISOString().split('T')[0];
+}
+
+async function updateStreak(userId) {
+  const profileRef = db.collection('epop_profiles').doc(userId);
+  const snap = await profileRef.get();
+  
+  const todayStr = getJSTDate();
+  let streak = 0;
+  let lastActivityDate = "";
+  
+  if (snap.exists) {
+    const data = snap.data();
+    streak = data.streak || 0;
+    lastActivityDate = data.lastActivityDate || "";
+  }
+
+  if (lastActivityDate === todayStr) return; // 当日更新有無の判定
+
+  const yesterday = new Date(new Date().getTime() - (24 * 60 * 60 * 1000));
+  const yesterdayStr = getJSTDate(yesterday);
+
+  if (lastActivityDate === yesterdayStr) {
+    streak += 1;
+  } else {
+    // 非継続時の初期化
+    streak = 1;
+  }
+
+  await profileRef.set({
+    streak,
+    lastActivityDate: todayStr,
+  }, { merge: true });
+}
+
+// ミドルウェアの設定
 app.use(express.json());
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || origin.startsWith('exp://') || origin.startsWith('http://localhost')) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  optionsSuccessStatus: 200,
-}));
+app.use(cors());
 
 async function verifyAuth(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -264,10 +280,7 @@ async function verifyAuth(req, res, next) {
   }
 }
 
-// ─────────────────────────────────────────────
-//  今日の出題単語リストを取得
-//  GET /api/epop/due
-// ─────────────────────────────────────────────
+// 出題語一覧取得API
 app.get('/api/epop/due', verifyAuth, async (req, res) => {
   try {
     await ensureDictCache();
@@ -276,20 +289,19 @@ app.get('/api/epop/due', verifyAuth, async (req, res) => {
 
     const isExtra = req.query.extra === 'true';
 
-    // プロフィールはもうレベル管理には使わないが、統計用に一応取得
+    // 統計用属性の取得
     const profileSnap = await db.collection('epop_profiles').doc(userId).get();
     
-    // 全員強制的に「現在のターゲットレベルは1」として扱う
-    // （将来的にレベル2をアンロックする仕様にしたいなら、ここでDBの値を参照する）
+    // 目標水準の設定
     const userTargetLevel = profileSnap.exists && profileSnap.data().unlockedLevel ? profileSnap.data().unlockedLevel : 1;
 
-    // 全学習済み単語のIDを取得
+    // 既習語IDの取得
     const allProgressSnap = await db.collection('epop_progress').doc(userId).collection('words').get();
     const learnedIds = new Set(allProgressSnap.docs.map(d => d.id));
 
     let reviewWords = [];
 
-    // 通常モード：今日の復習単語を取得
+    // 通常モード：復習対象語の取得
     if (!isExtra) {
       const dueSnap = await db
         .collection('epop_progress')
@@ -297,7 +309,6 @@ app.get('/api/epop/due', verifyAuth, async (req, res) => {
         .collection('words')
         .where('nextReview', '<=', now)
         .orderBy('nextReview')
-        .limit(7)
         .get();
 
       const rawReviewWords = dueSnap.docs
@@ -314,7 +325,7 @@ app.get('/api/epop/due', verifyAuth, async (req, res) => {
         })
         .filter(Boolean);
 
-      // DBに問題キャッシュが存在する単語だけに絞る
+      // 保存済み設問の抽出
       const reviewIds = rawReviewWords.map(w => w.id);
       let reviewCachedIds = new Set();
       if (reviewIds.length > 0) {
@@ -331,15 +342,15 @@ app.get('/api/epop/due', verifyAuth, async (req, res) => {
       reviewWords = rawReviewWords.filter(w => reviewCachedIds.has(w.id));
     }
 
-    // ▼▼ 新規単語の抽出ロジック（未学習 ＆ レベル1 ＆ ランダム） ▼▼
+    // 新規語抽出論理
     const newLimit = isExtra ? 10 : 5;
     
-    // 1. 未学習かつ、現在のターゲットレベル「以下」の単語を全てフィルタリング
+    // 1. 未習かつ目標水準以下の単語抽出
     const availableNewWords = dictCache.words.filter(w => 
       !learnedIds.has(w.id) && (w.level || 1) <= userTargetLevel
     );
 
-    // 2. DBに問題キャッシュが存在する単語だけに絞る（AI生成不要 = 429回避）
+    // 2. 保存済み単語への限定
     const availableIds = availableNewWords.map(w => w.id);
     let cachedIds = new Set();
     if (availableIds.length > 0) {
@@ -356,7 +367,7 @@ app.get('/api/epop/due', verifyAuth, async (req, res) => {
 
     const cachedNewWords = availableNewWords.filter(w => cachedIds.has(w.id));
 
-    // 3. 配列をランダムにシャッフルして必要数だけ切り出す
+    // 3. 攪拌及び抽出
     const newWords = cachedNewWords
       .sort(() => Math.random() - 0.5)
       .slice(0, newLimit)
@@ -367,7 +378,7 @@ app.get('/api/epop/due', verifyAuth, async (req, res) => {
       review: reviewWords,
       new: newWords,
       total: reviewWords.length + newWords.length,
-      userLevel: userTargetLevel, // 画面表示用
+      userLevel: userTargetLevel, // 画面表示用属性
     });
   } catch (error) {
     console.error('[/api/epop/due]', error.message);
@@ -375,11 +386,7 @@ app.get('/api/epop/due', verifyAuth, async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────
-//  穴埋め問題を取得（DBキャッシュ優先）
-//  POST /api/epop/pop
-//  Body: { wordId: string }
-// ─────────────────────────────────────────────
+// 穴埋め問題取得API
 app.post('/api/epop/pop', verifyAuth, async (req, res) => {
   const { wordId } = req.body;
   if (!wordId) return res.status(400).json({ error: 'wordIdが必要です' });
@@ -392,7 +399,7 @@ app.post('/api/epop/pop', verifyAuth, async (req, res) => {
     const { question, answer } = await getOrGenerateQuestion(wordId);
     const syllableCount = countSyllables(getPrimaryForm(word));
 
-    // explanationはDBからも取得（getOrGenerateQuestion経由で返さないためここで補完）
+    // 解説情報の補完
     const snap = await db.collection('epop_questions').doc(wordId).get();
     const explanation = snap.exists ? (snap.data().explanation ?? '') : '';
 
@@ -409,11 +416,7 @@ app.post('/api/epop/pop', verifyAuth, async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────
-//  問題文を再生成（キャッシュを上書き）
-//  POST /api/epop/pop/regenerate
-//  Body: { wordId: string }
-// ─────────────────────────────────────────────
+// 問題文再生成API
 app.post('/api/epop/pop/regenerate', verifyAuth, async (req, res) => {
   const { wordId } = req.body;
   if (!wordId) return res.status(400).json({ error: 'wordIdが必要です' });
@@ -459,10 +462,7 @@ app.post('/api/epop/pop/regenerate', verifyAuth, async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────
-//  回答結果を受け取りSRS更新
-//  POST /api/epop/review
-// ─────────────────────────────────────────────
+// 回答結果受領及びSRS更新API
 app.post('/api/epop/review', verifyAuth, async (req, res) => {
   const { wordId, isCorrect, wrongCount = 0, hintUsed = false, answerTimeMs, syllableCount = 2 } = req.body;
 
@@ -491,6 +491,8 @@ app.post('/api/epop/review', verifyAuth, async (req, res) => {
       lastQuality:    quality,
     }, { merge: true });
 
+    await updateStreak(req.userId);
+
     res.json({ success: true, quality, nextReview: updated.nextReview, interval: updated.interval });
   } catch (error) {
     console.error('[/api/epop/review]', error.message);
@@ -498,10 +500,7 @@ app.post('/api/epop/review', verifyAuth, async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────
-//  ユーザーの学習統計
-//  GET /api/epop/stats
-// ─────────────────────────────────────────────
+// 学習統計取得API
 app.get('/api/epop/stats', verifyAuth, async (req, res) => {
   try {
     await ensureDictCache();
@@ -526,7 +525,7 @@ app.get('/api/epop/stats', verifyAuth, async (req, res) => {
       if (d.interval >= 21) matureCount++;
     }
 
-    // dueCount: キャッシュ済みのみカウント
+    // 保存済み復習対象数の算出
     let cachedDueCount = 0;
     if (dueIds.length > 0) {
       const chunkSize = 30;
@@ -539,9 +538,11 @@ app.get('/api/epop/stats', verifyAuth, async (req, res) => {
       }
     }
 
-    // newCount: キャッシュ済みの未学習単語数
+    const userTargetLevel = profileSnap.exists && profileSnap.data().unlockedLevel ? profileSnap.data().unlockedLevel : 1;
+
+    // 保存済み新規語数の算出
     const unlearnedIds = dictCache.words
-      .filter(w => !learnedIds.has(w.id))
+      .filter(w => !learnedIds.has(w.id) && (w.level || 1) <= userTargetLevel)
       .map(w => w.id);
 
     let cachedNewCount = 0;
@@ -556,6 +557,19 @@ app.get('/api/epop/stats', verifyAuth, async (req, res) => {
       }
     }
 
+    // 継続日数の妥当性確認
+    const todayStr = getJSTDate();
+    const yesterday = new Date(new Date().getTime() - (24 * 60 * 60 * 1000));
+    const yesterdayStr = getJSTDate(yesterday);
+    
+    let currentStreak = profileSnap.exists ? (profileSnap.data().streak || 0) : 0;
+    const lastDate = profileSnap.exists ? (profileSnap.data().lastActivityDate || "") : "";
+    
+    // 非継続時の継続日数設定
+    if (lastDate !== todayStr && lastDate !== yesterdayStr) {
+      currentStreak = 0;
+    }
+
     res.json({
       success: true,
       stats: {
@@ -566,6 +580,8 @@ app.get('/api/epop/stats', verifyAuth, async (req, res) => {
         newCount: Math.min(cachedNewCount, 5),
         userLevel: profileSnap.exists ? (profileSnap.data().level || 1) : null,
         placementDone: profileSnap.exists ? !!profileSnap.data().placementDone : false,
+        streak: currentStreak,
+        lastActivityDate: lastDate || null,
       },
     });
   } catch (error) {
@@ -574,11 +590,7 @@ app.get('/api/epop/stats', verifyAuth, async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────
-//  既存問題データのマイグレーション（旧形式 → 新フラット形式）
-//  POST /api/epop/migrate-questions
-//  ※ 管理者用。一度実行すれば不要
-// ─────────────────────────────────────────────
+// 問題データ移行API
 app.post('/api/epop/migrate-questions', verifyAuth, async (req, res) => {
   try {
     const snap = await db.collection('epop_questions').get();
@@ -589,10 +601,10 @@ app.post('/api/epop/migrate-questions', verifyAuth, async (req, res) => {
     for (const doc of snap.docs) {
       const d = doc.data();
 
-      // すでに新形式（example フィールドがトップレベルにある）ならスキップ
+      // 移行済みデータの除外判定
       if (d.example) { skipped++; continue; }
 
-      // 旧形式: question がネストオブジェクト
+      // 旧形式の判定
       const q = d.question;
       if (!q) { skipped++; continue; }
 
@@ -620,9 +632,7 @@ app.post('/api/epop/migrate-questions', verifyAuth, async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────
-//  プレイスメントテスト用
-// ─────────────────────────────────────────────
+// 判定テストAPI
 app.get('/api/epop/placement', verifyAuth, async (req, res) => {
   try {
     await ensureDictCache();
@@ -632,7 +642,7 @@ app.get('/api/epop/placement', verifyAuth, async (req, res) => {
       return res.json({ success: true, alreadyDone: true, level: profileSnap.data().unlockedLevel || 1 });
     }
 
-    // 各レベルから数問ずつランダムに抽出
+    // 難易度別無作為抽出
     const placementWords = [];
     for (let lv = 1; lv <= 3; lv++) {
       const lvWords = dictCache.words.filter(w => (w.level || 1) === lv);
@@ -652,7 +662,7 @@ app.post('/api/epop/placement/finish', verifyAuth, async (req, res) => {
   if (!results) return res.status(400).json({ error: 'resultsが必要です' });
 
   try {
-    // 正解数に応じて初期レベルを決定
+    // 初期水準の判定
     const correctCount = results.filter(r => r.isCorrect).length;
     let level = 1;
     if (correctCount >= 7) level = 3;
@@ -689,7 +699,7 @@ app.post('/api/epop/cache-all', verifyAuth, async (req, res) => {
         generated++;
         console.log(`[CACHE-ALL] generated: ${word.id} (${generated}/${allWords.length})`);
 
-        // Gemini のレート制限対策
+        // API制限回避のための待機
         await new Promise(r => setTimeout(r, 1000));
       } catch (e) {
         console.error(`[CACHE-ALL] failed: ${word.id}`, e.message);
@@ -704,9 +714,7 @@ app.post('/api/epop/cache-all', verifyAuth, async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────
-//  Start server
-// ─────────────────────────────────────────────
+// サーバーの起動
 app.listen(port, '0.0.0.0', () => {
   console.log(`ipop server running on port ${port}`);
 });

@@ -20,7 +20,7 @@ const firebaseConfig = {
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
-// すでに初期化済みの場合は getAuth で取得（二重初期化エラーを防ぐ）
+// 重複初期化の回避
 let auth;
 try {
   const persistence = Platform.OS === 'web' 
